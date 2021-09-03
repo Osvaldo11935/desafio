@@ -1,0 +1,135 @@
+
+using GraphQL;
+using GraphQL.Types;
+using GraphQL.Validation;
+using ISS.GraphQL.Query.Extra;
+using ISS.WebApi.Models;
+using ISWebLib;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Cors;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+namespace ISWebApp.Api
+{
+            //[Authorize(Roles = "Admin")]
+            [Route("[controller]")]
+            public class GraphQLController : ControllerBase
+            {
+
+                        private readonly IDocumentExecuter _documentExecuter;
+                        private readonly ISchema _schema;
+
+                        private readonly IDistributedCacheService _redisCache;
+                        private readonly IValidationRule _validationRule;
+                        private readonly IHttpContextAccessor _httpContextAccessor;
+                        private readonly IAdicionais _adicionais;
+                        //protected readonly IEnumerable<FieldType>  Fields;
+
+                        public GraphQLController(ISchema schema,
+                                                 IDocumentExecuter documentExecuter,
+                                                 IDistributedCacheService redisCache,
+                                                 IValidationRule validationRule,
+                                                 IHttpContextAccessor httpContextAccessor,
+                                                 IAdicionais adicionais
+                            )
+                        {
+                                    // _Fields = Fields;
+                                    _schema = schema;
+                                    _documentExecuter = documentExecuter;
+                                    _validationRule = validationRule;
+                                    _httpContextAccessor = httpContextAccessor;
+                                    _redisCache = redisCache;
+                                    _adicionais = adicionais;
+                        }
+
+                        [HttpPost]
+                        public async Task<IActionResult> Post([FromBody] GraphQLQuery query)
+                        {
+                                    Dictionary<string, int> codErrro = new Dictionary<string, int>()
+        {
+            {"Voce não tem permição para acessar esta API!",405},
+            {"É necessario autorização para acessar  .",401},
+            {"É necessario autorização para acessar  IntrospectionQuery.",401},
+            {"Voce não esta autorizado a correr esta  query.",401},
+        };
+                                    var argumentsQuery = new Dictionary<string, string>();
+                                    ExecutionResult result;
+                                    var resData = new Dictionary<string, object>();
+                                    if (query == null) { throw new ArgumentNullException(nameof(query)); }
+                                    var executionOptions = new ExecutionOptions
+                                    {
+                                                Schema = _schema,
+                                                Query = query.Query,
+                                                Inputs = query.Variables?.ToInputs(),
+                                                ValidationRules = new List<IValidationRule> { _validationRule },
+                                                UserContext = _httpContextAccessor.HttpContext.User,
+                                    };
+                                    result = await _documentExecuter.ExecuteAsync(executionOptions).ConfigureAwait(false);
+                                    //_adicionais.setPropReturn(result);
+                                    if (result.Errors?.Count > 0)
+                                    {
+                                                var message = result.Errors.Select(_ => _.Message).FirstOrDefault();
+                                                var cod = codErrro.FirstOrDefault(x => x.Key == message).Value;
+                                                return Problem(detail: message, title: result.Errors.Select(_ => _.Code).FirstOrDefault(), statusCode: cod == 0 ? 400 : cod);
+                                    }
+                                    var childrens = result.Document.Children.ElementAt(0).Children;
+                                    foreach (var children in childrens)
+                                    {
+                                                var args = (System.Collections.IList)children.Children.ElementAt(0).GetPropertyValue("Arguments").GetPropertyValue("Children");
+                                                foreach (var arg in args)
+                                                {
+                                                            argumentsQuery.Add(arg.GetPropertyValue("Name").ToString(), arg.GetPropertyValue("value").GetPropertyValue("value").ToString());
+                                                }
+                                    }
+                                    var id = result.Data as Dictionary<string, object>;
+                                    var opName = result.Operation.OperationType.GetValue();
+                                    if (result.Operation.Name != "IntrospectionQuery" && opName.ToString() != "Mutation")
+                                    {
+                                                int valueLimit = 0;
+                                                string contemLimit =null;
+                                                resData = result.Data as Dictionary<string, object>;
+                                                var dados = id.ElementAt(0).Value;
+                                                if (dados.GetType().FullName.StartsWith("System.Collections"))
+                                                {
+                                                            var td = (System.Collections.IList)dados;
+                                                            resData.Add("TotalData", td.Count);
+                                                            contemLimit=argumentsQuery.FirstOrDefault(e=>e.Key=="limit").Value;
+                                                            if (contemLimit!=null)
+                                                            {
+                                                                        var pp = "\"";
+                                                                        var propId = argumentsQuery.Keys.ElementAt(2);
+                                                                        for(var i=0;i<argumentsQuery.Keys.Count;i++)
+                                                                        {
+                                                                            if(argumentsQuery.Keys.ElementAt(i)=="id")
+                                                                            propId=  argumentsQuery.Keys.ElementAt(i);
+                                                                        }
+                                                                        valueLimit = int.Parse(argumentsQuery.FirstOrDefault(e => e.Key == "limit").Value);
+                                                                        var valueId = argumentsQuery.FirstOrDefault(e => e.Key == "id").Value;
+                                                                        executionOptions.Query = "query{" + id.ElementAt(0).Key + "(" + propId + ":'" + valueId + "')}";
+                                                                        executionOptions.Query = executionOptions.Query.Replace("'", pp);
+                                                                        executionOptions.Query = executionOptions.Query.Replace(@"\", "");
+                                                                        var countResult = await _documentExecuter.ExecuteAsync(executionOptions).ConfigureAwait(false);
+                                                                        var countDB = countResult.Data as Dictionary<string, object>;
+                                                                        var db = (System.Collections.IList)countDB.ElementAt(0).Value;
+                                                                        resData.Add("TotalDB", db.Count);
+                                                                        resData.Add("TotalPaginas", td.Count / valueLimit);
+                                                            }
+                                                            else if (contemLimit==null)
+                                                            {
+                                                                        resData.Add("TotalDB", td.Count);
+                                                                        resData.Add("TotalPaginas", 0);
+                                                            }
+                                                            result.Data = resData;
+                                                }
+
+                                    }
+
+                                    return Ok(result);
+                        }
+            }
+}

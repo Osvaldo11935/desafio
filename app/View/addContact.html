@@ -1,0 +1,30 @@
+<form method="post" action="?page=contact&action=create" enctype="multipart/form-data">
+  <span>
+    <p>{{message}}</p>
+  </span>
+  {%for msg in errors.field%}
+
+  <span>{{msg.field}}<p>{{msg.message}}</p></span>
+  {%endfor%}
+  {%for upload in msg.upload%}
+  <span>{{upload}}</span>
+  {%endfor%}
+  <div class="row">
+    <div class="col-4">
+      <input type="text" name="name" class="form-control" placeholder="nome:">
+    </div>
+    <div class="col-4">
+      <input type="email" name="email" class="form-control" id="email" placeholder="name@example.com">
+    </div>
+    <div class="col-4">
+      <input type="number" name="telephone" class="form-control" id="telephone" placeholder="943***944">
+    </div>
+  </div><br><div class="col-12">
+    <textarea class="form-control" name="message" id="message" placeholder="Mensagem"></textarea>
+  </div>
+  <div class="col-12">
+    <label for="floatingTextarea">Arquivo</label>
+    <input class="form-control" name="file" type="file">
+  </div><br>
+  <button class="w-100 btn btn-lg btn-primary" type="submit">Enviar</button>
+</form>
